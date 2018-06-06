@@ -2,48 +2,7 @@
 library(shiny)
 library(deSolve)
 
-#SLIKR DiffEq Model
-seir_model = function (current_timepoint, state_values, parameters)
-{
-  # create state variables (local variables)
-  S = state_values [1]        # susceptibles
-  L = state_values [2]        # latent
-  I = state_values [3]        # infectious
-  K = state_values [4]        # killed (immediately)
-  R = state_values [5]        # recovered
-  Tot = sum(state_values) #Total
-  
-  with ( 
-    as.list (parameters),     # variable names within parameters can be used 
-    {
-      dead_pct = (K/Tot)
-      if(dead_pct<scared){
-        distancing_pct = distancing*max(min(((dead_pct-min_scary)/(scared-min_scary)),1),0) #Linear between min_scared and scared % 
-      } else {
-        if(continue_distancing){
-          distancing_pct = distancing + (1-distancing)*(dead_pct-scared)/(1-scared) #Linear up to 100% 
-        } else {distancing_pct = distancing} #Or stay at max.
-      }
-      adjusted_contact_rate = contact_rate * (1-distancing_pct)
-      beta = adjusted_contact_rate * transmission_probability
-      gamma = (1 / infectious_period) - case_fatality / infectious_period
-      delta = 1 / latent_period
-      mu = case_fatality / infectious_period
-
-      # compute derivatives
-      dS = (-beta * S * I)
-      dL = (beta * S * I) - (delta * L)
-      dI = (delta * L) - (mu * I) -(gamma * I)
-      dK = (mu * I)
-      dR = (gamma * I)
-      
-      # combine results
-      results = c (dS, dL, dI, dK, dR)
-      return(list(results))
-    }
-  )
-}
-
+source('Single SLIKR Model.R')
 
 #Disease dynamics parameters.
 parameter_list = c (
@@ -53,8 +12,8 @@ parameter_list = c (
   latent_period = 0.001, # latent period
   case_fatality = .95,
   distancing = .75, #How mcuh will people stop interacting, maximum
-  min_scary = 0.001, #What percentage of people need to die before people start distancing
-  scared = 0.05, #What percentage of people need to die before people are about maximally distancing
+  min_scary = 0.025, #What percentage of people need to die before people start distancing
+  max_scary = 0.075, #What percentage of people need to die before people are about maximally distancing
   continue_distancing=TRUE #Do people keep distancing?
 )
 
@@ -75,7 +34,6 @@ initial_values = c (S = W/N, L = X/N, I = Y/N, K = ZED/N, R = Z/N)
 
 tick_size = 1/10
 timepoints = seq (0, 200, by=tick_size)
-
 ui <- fixedPage(
   title="SLIKR Epidemic with Distancing",
   # App title ----
@@ -84,7 +42,7 @@ ui <- fixedPage(
       column(4,
              # Input: Slider for the number of bins ----
              sliderInput(inputId = "contact_rate",
-                         label = "Number of Daily Contacts Per Person:",
+                         label = "Initial Daily Contacts Per Person:",
                          min = 0.1,
                          max = 50,
                          value = 20),
@@ -113,7 +71,7 @@ ui <- fixedPage(
       ),
   column(4,
          sliderInput(inputId = "distancing",
-                     label = "Initial decrease in contacts due to fear:",
+                     label = "Percentage decrease in contacts due to fear",
                      min = 0,
                      max = 1,
                      value = .75),
@@ -146,22 +104,13 @@ server <- function(input, output) {
       case_fatality = input$case_fatality,
       distancing = input$distancing, #How mcuh will people stop interacting, maximum
       min_scary = input$scary_range[1], #What percentage of people need to die before people start distancing
-      scared = input$scary_range[2], #What percentage of people need to die before people are about maximally distancing
+      max_scary = input$scary_range[2], #What percentage of people need to die before people are about maximally distancing
       continue_distancing = input$continue_distancing #Do people thin out?
     )
     
     #Simulate
-    output = lsoda (initial_values, timepoints, seir_model, parameter_list)
+    output = lsoda (initial_values, timepoints, Single_SLIKR_Model, parameter_list)
     
-    #Find where it is stable?
-    #i=1;abs_diff=1
-    #while (abs_diff>1e-7){
-    #  abs_diff=sum(abs(output[i]-output[i+1])[2:6])
-    #}
-    #
-    #i = i*1.1
-    #xmax = round(i / tick_size, 0)
-        
     #Plot dynamics of all sub-populations.
     # susceptible hosts over time
     plot (S ~ time, data = output, type='l', ylim = c(0,1), col = 'blue', lwd=2, ylab = 'Pct in Compartment', main = 'SLIKR Epidemic with Distancing') 
@@ -186,7 +135,7 @@ server <- function(input, output) {
 
     abline(v=min(which(output[,'K']>input$scary_range[1])*tick_size))
     abline(v=min(which(output[,'K']>input$scary_range[2])*tick_size))
-    legend(x="topright", legend=c("Susceptible ","Latent","Infectious","Dead","Recovered"), fill=c('blue','grey', 'black', 'red', 'green'))
+    legend(x="topright", legend=c("Susceptible ","Latent","Infectious","Killed","Recovered"), fill=c('blue','grey', 'black', 'red', 'green'))
     
  
       })
